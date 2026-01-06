@@ -36,4 +36,29 @@ class TEIDeepVkUserBgeM3:
         if os.environ.get('TEI_EMBEDDING_MODEL_URL') is None:
             logger.warning('TEI Embedding Model URL not found. Please set the TEI_EMBEDDING_MODEL_URL environment variable.')
             
+
+@dataclass
+class Mem0OpenaiEmbeddingModel:
+    """
+    https://docs.mem0.ai/components/embedders/models/openai
+    """
+    config: Dict[str, Any] = field(default_factory=lambda: 
+        {
+            'embedder': {
+                'provider': 'openai', 
+                'config': {
+                    'model': 'takes from env',
+                }
+            }
+        })
+        
+    def __post_init__(self):
+        self._log_warnings()
+        self.config['embedder']['config']['model'] = str(os.environ.get('MEMORY_LLM_EMBEDDINGS_MODEL', 'text-embedding-3-large'))
+        logger.info(self.config)
+    
+    def _log_warnings(self):
+        if os.environ.get('MEMORY_LLM_EMBEDDINGS_MODEL') is None:
+            logger.warning('MEMORY_LLM_EMBEDDINGS_MODEL not found. Please set the MEMORY_LLM_EMBEDDINGS_MODEL environment variable.')
+            
     

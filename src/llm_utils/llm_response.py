@@ -74,6 +74,12 @@ class Responser:
                 base_url=self.cfg.CHAT_LLM.base_url
             )
             return chat_client
+        elif isinstance(self.cfg.CHAT_LLM, ChatOpenaiLLMProvider):
+            from openai import OpenAI
+            chat_client = OpenAI(
+                api_key=self.cfg.CHAT_LLM.chat_llm_api_key,
+            )
+            return chat_client
         
         logger.error(f'Unknown chat LLM provider: {self.cfg.CHAT_LLM.__name__}')
         return
