@@ -67,7 +67,6 @@ def main() -> None:
     args = parser.parse_args()
     
     config = Config()
-    
     responser = Responser(config)
 
     def message_processor(message: str, metadata: Dict[str, Any]) -> str:
