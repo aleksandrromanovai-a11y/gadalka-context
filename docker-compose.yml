@@ -5,12 +5,35 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      KAFKA_INPUT_TOPIC: ${KAFKA_INPUT_TOPIC:-gadalka-input}
+      KAFKA_OUTPUT_TOPIC: ${KAFKA_OUTPUT_TOPIC:-gadalka-output}
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-gadalka-consumer}
     ports:
       - "${APP_PORT:-8000}:8000"
     command: ["python", "src/main.py", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       - qdrant
       - redis
+      - redpanda
+    # restart: unless-stopped
+
+  kafka-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      MESSAGE_BUS_MODE: ${MESSAGE_BUS_MODE:-kafka}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      KAFKA_INPUT_TOPIC: ${KAFKA_INPUT_TOPIC:-gadalka-input}
+      KAFKA_OUTPUT_TOPIC: ${KAFKA_OUTPUT_TOPIC:-gadalka-output}
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-gadalka-consumer}
+    depends_on:
+      - redpanda
+    command: ["python", "-m", "kafka_bus.worker"]
     # restart: unless-stopped
 
   qdrant:
@@ -30,7 +53,45 @@ services:
       - redis_data:/data
     # restart: unless-stopped
 
+  redpanda:
+    image: docker.redpanda.com/redpanda/redpanda:latest
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092,OUTSIDE://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092,OUTSIDE://localhost:19092
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    # restart: unless-stopped
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8085:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: redpanda:9092
+    depends_on:
+      - redpanda
+    # restart: unless-stopped
+
 volumes:
   qdrant_storage:
   redis_data:
+  redpanda_data:
 

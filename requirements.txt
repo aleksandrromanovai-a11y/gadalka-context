@@ -2,3 +2,5 @@ uvicorn
 fastapi
 mem0ai
 redis
+confluent-kafka
+pytest
