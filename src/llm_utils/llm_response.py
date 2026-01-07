@@ -1,14 +1,14 @@
 from typing import Dict, Any
 from time import perf_counter
 import os
-from collections import deque
 
-from mem0 import Memory
+from mem0 import Memory  # type: ignore
 
 from log.logger import get_logger
 from environment import Config
-from .prompt_example import USER_PROMPT, SYSTEM_PROMPT
+from .prompt_example import SYSTEM_PROMPT
 from configs.chat_llm_providers import *
+from redis_memory import RedisMemory
 
 logger = get_logger(__name__)
 
@@ -37,22 +37,63 @@ class Responser:
         self.max_context_chars = int(os.environ.get('MEMORY_CONTEXT_MAX_CHARS', 2000))
         self.default_user_id = os.environ.get('MEMORY_DEFAULT_USER_ID', 'default')
         self.default_session_id = os.environ.get('MEMORY_DEFAULT_SESSION_ID', 'default_session')
-        self.max_history_messages = int(os.environ.get('MEMORY_TOP_K_LAST_MESSAGES', 3))
-        self.recent_messages: Dict[str, deque] = {}
-        # logger.info(self.CFG.OPENAI_API_KEY)
-        # self.openai_client = OpenAI(api_key=self.CFG.OPENAI_API_KEY)
         self.chat_client = self._define_chat_client()
+        self.redis_memory = RedisMemory(
+            host=self.cfg.REDIS.host,
+            port=self.cfg.REDIS.port,
+            db=self.cfg.REDIS.db,
+            window_size=self.cfg.REDIS.window_size,
+        )
         
         
     def get_response(self, prompt: str, metadata: Dict[str, Any]) -> str | None:
         if self.chat_client is None:
             return ''
         user_id, session_id = self._resolve_ids(metadata)
-        memory_context = ''
+        chat_id = self._chat_id(user_id, session_id)
         mem_metadata = {'session_id': session_id, **(metadata or {})}
-        recent_dialog = self._get_recent_history(user_id, session_id)
         search_t0 = perf_counter()
+        recent_dialog = self._load_recent_dialog(chat_id)
+        memory_context = self._search_memory_context(prompt, user_id)
+        search_t1 = perf_counter()
 
+        messages = self._build_messages(prompt, recent_dialog, memory_context)
+        logger.info(
+            'Chat prompt (no system): history=%s, context=%s, user=%s',
+            recent_dialog,
+            memory_context,
+            prompt,
+        )
+
+        response_content = self._chat_completion(messages)
+        if response_content is None:
+            return ''
+
+        dialog_pair = [
+            {'role': 'user', 'content': prompt},
+            {'role': 'assistant', 'content': response_content},
+        ]
+
+        save_t0 = perf_counter()
+        self._persist_memory(dialog_pair, user_id, mem_metadata, chat_id)
+        save_t1 = perf_counter()
+
+        logger.info(
+            'Timings: search=%.2f sec, chat+save=%.2f sec',
+            search_t1 - search_t0,
+            save_t1 - search_t1,
+        )
+
+        return response_content
+
+    def _load_recent_dialog(self, chat_id: str) -> list[Dict[str, str]]:
+        try:
+            return self.redis_memory.get_last_messages(chat_id)
+        except Exception as redis_err:
+            logger.warning('Redis history fetch failed: %s', redis_err, exc_info=True)
+            return []
+
+    def _search_memory_context(self, prompt: str, user_id: str) -> str:
         try:
             search_results = self.memory.search(prompt, user_id=user_id)
             logger.info('Mem0 search results: %s', search_results)
@@ -76,14 +117,19 @@ class Responser:
                     items = []
 
             if items:
-                memory_context = self._build_context(items)
+                return self._build_context(items)
         except Exception as mem_err:
             logger.warning('Mem0 search failed: %s', mem_err, exc_info=True)
-        search_t1 = perf_counter()
 
-        messages = [
-            {'role': 'system', 'content': SYSTEM_PROMPT},
-        ]
+        return ''
+
+    def _build_messages(
+        self,
+        prompt: str,
+        recent_dialog: list[Dict[str, str]],
+        memory_context: str,
+    ) -> list[Dict[str, str]]:
+        messages: list[Dict[str, str]] = [{'role': 'system', 'content': SYSTEM_PROMPT}]
         if recent_dialog:
             messages.extend(recent_dialog)
         if memory_context:
@@ -94,47 +140,42 @@ class Responser:
                 }
             )
         messages.append({'role': 'user', 'content': prompt})
+        return messages
 
-        logger.info(
-            'Chat prompt (no system): history=%s, context=%s, user=%s',
-            recent_dialog,
-            memory_context,
-            prompt,
-        )
-
+    def _chat_completion(self, messages: list[Dict[str, str]]) -> str | None:
         try:
             response_t0 = perf_counter()
             response = self.chat_client.chat.completions.create(
                 model=self.cfg.CHAT_LLM.config['llm']['config']['model'],
-                messages=messages
+                messages=messages,
             )
             logger.info(response)
             response_content = response.choices[0].message.content
             response_t1 = perf_counter()
             logger.info(response_content)
-            logger.info(
-                'Timings: search=%.2f sec, chat=%.2f sec',
-                search_t1 - search_t0,
-                response_t1 - response_t0,
-            )
-
-            try:
-                save_t0 = perf_counter()
-                dialog_pair = [
-                    {'role': 'user', 'content': prompt},
-                    {'role': 'assistant', 'content': response_content},
-                ]
-                self.memory.add(dialog_pair, user_id=user_id, metadata={'role': 'conversation', **mem_metadata})
-                self._remember_recent_history(user_id, session_id, dialog_pair)
-                save_t1 = perf_counter()
-                logger.info('Save time: %.2f sec', save_t1 - save_t0)
-            except Exception as mem_add_err:
-                logger.warning('Mem0 add failed: %s', mem_add_err, exc_info=True)
-
+            logger.info('Chat time: %.2f sec', response_t1 - response_t0)
             return response_content
-        except Exception as e:
-            logger.error(f'Failed to get response from OpenAI: {e}', exc_info=True)
-            return ''
+        except Exception as chat_err:
+            logger.error(f'Failed to get response from OpenAI: {chat_err}', exc_info=True)
+            return None
+
+    def _persist_memory(
+        self,
+        dialog_pair: list[Dict[str, str]],
+        user_id: str,
+        mem_metadata: Dict[str, Any],
+        chat_id: str,
+    ) -> None:
+        try:
+            self.memory.add(dialog_pair, user_id=user_id, metadata={'role': 'conversation', **mem_metadata})
+        except Exception as mem_add_err:
+            logger.warning('Mem0 add failed: %s', mem_add_err, exc_info=True)
+
+        try:
+            self.redis_memory.add_message(chat_id, 'user', dialog_pair[0]['content'])
+            self.redis_memory.add_message(chat_id, 'assistant', dialog_pair[1]['content'])
+        except Exception as redis_err:
+            logger.warning('Redis history save failed: %s', redis_err, exc_info=True)
 
     def _format_memory_context(self, items: list[Dict[str, Any]]) -> str:
         if not items:
@@ -253,32 +294,19 @@ class Responser:
 
         return user_id, session_id
 
-    def _history_key(self, user_id: str, session_id: str) -> str:
+    def _chat_id(self, user_id: str, session_id: str) -> str:
         return f'{user_id}:{session_id}'
-
-    def _get_recent_history(self, user_id: str, session_id: str) -> list[Dict[str, str]]:
-        key = self._history_key(user_id, session_id)
-        history = self.recent_messages.get(key)
-        if not history:
-            return []
-        return list(history)
-
-    def _remember_recent_history(self, user_id: str, session_id: str, dialog_pair: list[Dict[str, str]]) -> None:
-        key = self._history_key(user_id, session_id)
-        if key not in self.recent_messages:
-            self.recent_messages[key] = deque(maxlen=self.max_history_messages * 2)
-        self.recent_messages[key].extend(dialog_pair[-(self.max_history_messages * 2):])
     
     def _define_chat_client(self):
         if isinstance(self.cfg.CHAT_LLM, ChatDeepSeekLLMProvider):
-            from openai import OpenAI
+            from openai import OpenAI  # type: ignore
             chat_client = OpenAI(
                 api_key=self.cfg.CHAT_LLM.chat_llm_api_key,
                 base_url=self.cfg.CHAT_LLM.base_url
             )
             return chat_client
         elif isinstance(self.cfg.CHAT_LLM, ChatOpenaiLLMProvider):
-            from openai import OpenAI
+            from openai import OpenAI  # type: ignore
             chat_client = OpenAI(
                 api_key=self.cfg.CHAT_LLM.chat_llm_api_key,
             )

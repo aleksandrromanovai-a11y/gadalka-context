@@ -12,6 +12,21 @@ from log.logger import get_logger
 
 logger = get_logger(__name__)
 
+
+@dataclass
+class RedisConfig:
+    host: str = 'redis'
+    port: int = 6379
+    db: int = 0
+    window_size: int = 10
+
+    def __post_init__(self) -> None:
+        self.host = os.environ.get('REDIS_HOST', self.host)
+        self.port = int(os.environ.get('REDIS_PORT', self.port))
+        self.db = int(os.environ.get('REDIS_DB', self.db))
+        self.window_size = int(os.environ.get('CHAT_HISTORY_WINDOW_SIZE', self.window_size))
+
+
 @dataclass
 class Mem0Config:
     llm: Mem0DeepSeekLLMProvider | Mem0OpenaiLLMProvider = field(default_factory=Mem0OpenaiLLMProvider)
@@ -73,6 +88,7 @@ class Mem0Config:
 class Config:
     CHAT_LLM: ChatDeepSeekLLMProvider | ChatOpenaiLLMProvider = field(default_factory=ChatOpenaiLLMProvider)
     MEM0: Mem0Config = field(default_factory=Mem0Config)
+    REDIS: RedisConfig = field(default_factory=RedisConfig)
     
     def __post_init__(self):
         # CHAT_LLM REDEFINE
@@ -90,5 +106,4 @@ class Config:
             except KeyError:
                 logger.error(f'Unknown CHAT_LLM_PROVIDER: {os.environ.get("CHAT_LLM_PROVIDER")}')
                 raise ValueError(f'Unknown CHAT_LLM_PROVIDER: {os.environ.get("CHAT_LLM_PROVIDER")}')
-            
-    
+        
