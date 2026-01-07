@@ -2,3 +2,4 @@ uvicorn
 fastapi
 mem0ai
 redis
+kafka-python

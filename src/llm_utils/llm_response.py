@@ -9,6 +9,8 @@ from environment import Config
 from .prompt_example import SYSTEM_PROMPT
 from configs.chat_llm_providers import *
 from redis_memory import RedisMemory
+from kafka_bus.communication import Orchestrator
+from kafka_bus.consumer import KafkaConsumerOutput
 
 logger = get_logger(__name__)
 
@@ -46,36 +48,36 @@ class Responser:
         )
         
         
-    def get_response(self, prompt: str, metadata: Dict[str, Any]) -> str | None:
+    def get_response(self, msg: KafkaConsumerOutput) -> str | None:
+
+        request_text: str = msg.request_text
+        request_id: str = msg.request_id
+        bot_id: str = msg.bot_id
+        chat_id: str = msg.chat_id
+        natal_chart: str = msg.natal_chart
+
         if self.chat_client is None:
             return ''
-        user_id, session_id = self._resolve_ids(metadata)
-        chat_id = self._chat_id(user_id, session_id)
-        mem_metadata = {'session_id': session_id, **(metadata or {})}
+        chat_id = self._chat_id(chat_id, bot_id)
         search_t0 = perf_counter()
         recent_dialog = self._load_recent_dialog(chat_id)
-        memory_context = self._search_memory_context(prompt, user_id)
+        memory_context = self._search_memory_context(request_text, chat_id)
         search_t1 = perf_counter()
 
-        messages = self._build_messages(prompt, recent_dialog, memory_context)
-        logger.info(
-            'Chat prompt (no system): history=%s, context=%s, user=%s',
-            recent_dialog,
-            memory_context,
-            prompt,
-        )
+        messages = self._build_messages(request_text, natal_chart, recent_dialog, memory_context)
+        logger.debug(f'Request messages: {messages}')
 
         response_content = self._chat_completion(messages)
         if response_content is None:
             return ''
 
         dialog_pair = [
-            {'role': 'user', 'content': prompt},
+            {'role': 'user', 'content': request_text},
             {'role': 'assistant', 'content': response_content},
         ]
 
         save_t0 = perf_counter()
-        self._persist_memory(dialog_pair, user_id, mem_metadata, chat_id)
+        self._persist_memory(dialog_pair, chat_id)
         save_t1 = perf_counter()
 
         logger.info(
@@ -93,9 +95,9 @@ class Responser:
             logger.warning('Redis history fetch failed: %s', redis_err, exc_info=True)
             return []
 
-    def _search_memory_context(self, prompt: str, user_id: str) -> str:
+    def _search_memory_context(self, request_text: str, chat_id: str) -> str:
         try:
-            search_results = self.memory.search(prompt, user_id=user_id)
+            search_results = self.memory.search(request_text, user_id=chat_id)
             logger.info('Mem0 search results: %s', search_results)
 
             items = []
@@ -106,8 +108,8 @@ class Responser:
 
             items = list(items) if items else []
 
-            if not items and user_id != self.default_user_id:
-                fallback_results = self.memory.search(prompt, user_id=self.default_user_id)
+            if not items and chat_id != self.default_user_id:
+                fallback_results = self.memory.search(request_text, user_id=self.default_user_id)
                 logger.info('Mem0 fallback search results: %s', fallback_results)
                 if isinstance(fallback_results, dict):
                     items = fallback_results.get('results') or fallback_results.get('data') or []
@@ -125,7 +127,8 @@ class Responser:
 
     def _build_messages(
         self,
-        prompt: str,
+        request_text: str,
+        natal_chart: str,
         recent_dialog: list[Dict[str, str]],
         memory_context: str,
     ) -> list[Dict[str, str]]:
@@ -139,7 +142,14 @@ class Responser:
                     'content': f'--- CONTEXT START ---\n{memory_context}\n--- CONTEXT END ---',
                 }
             )
-        messages.append({'role': 'user', 'content': prompt})
+        if natal_chart:
+            messages.append(
+                {
+                    'role': 'system',
+                    'content': f'--- NATAL CHART START ---\n{natal_chart}\n--- NATAL CHART END ---',
+                }
+            )
+        messages.append({'role': 'user', 'content': request_text})
         return messages
 
     def _chat_completion(self, messages: list[Dict[str, str]]) -> str | None:
@@ -162,12 +172,10 @@ class Responser:
     def _persist_memory(
         self,
         dialog_pair: list[Dict[str, str]],
-        user_id: str,
-        mem_metadata: Dict[str, Any],
         chat_id: str,
-    ) -> None:
+    ) -> None:  
         try:
-            self.memory.add(dialog_pair, user_id=user_id, metadata={'role': 'conversation', **mem_metadata})
+            self.memory.add(dialog_pair, user_id=chat_id, metadata={'role': 'conversation'})
         except Exception as mem_add_err:
             logger.warning('Mem0 add failed: %s', mem_add_err, exc_info=True)
 
@@ -276,26 +284,8 @@ class Responser:
                 pass
         return 0.0
 
-    def _resolve_ids(self, metadata: Dict[str, Any] | None) -> tuple[str, str]:
-        user_id = self.default_user_id
-        session_id = self.default_session_id
-
-        if metadata:
-            user_id = str(metadata.get('user_id', user_id))
-            session_id = str(metadata.get('session_id', session_id))
-
-            headers = metadata.get('headers') or {}
-            for key, value in headers.items():
-                key_l = str(key).lower()
-                if key_l == 'x-user-id':
-                    user_id = str(value)
-                if key_l == 'x-session-id':
-                    session_id = str(value)
-
-        return user_id, session_id
-
-    def _chat_id(self, user_id: str, session_id: str) -> str:
-        return f'{user_id}:{session_id}'
+    def _chat_id(self, user_id: str, bot_id: str) -> str:
+        return f'{user_id}:{bot_id}'
     
     def _define_chat_client(self):
         if isinstance(self.cfg.CHAT_LLM, ChatDeepSeekLLMProvider):
