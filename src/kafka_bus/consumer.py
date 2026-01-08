@@ -125,6 +125,12 @@ class KafkaMsgConsumer(multiprocessing.Process):
             raise TypeError('Kafka payload must be a JSON object with a request_text field.')
 
         request_text = payload.get('request_text')
+        natal_chart = payload.get('natal_chart')
+        if natal_chart is None:
+            natal_chart = ''
+            logger.warning('natal_chart is not provided in kafka payload.')
+        if not isinstance(natal_chart, str):
+            natal_chart = str(natal_chart)
         if request_text is None:
             raise KeyError('request_text is required in kafka payload.')
         if not isinstance(request_text, str):
@@ -154,5 +160,5 @@ class KafkaMsgConsumer(multiprocessing.Process):
             request_id=headers['request_id'],
             bot_id=headers['bot_id'],
             chat_id=headers['chat_id'],
-            natal_chart=headers.get('natal_chart', ''),
+            natal_chart=natal_chart,
         )
