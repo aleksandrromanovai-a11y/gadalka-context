@@ -12,6 +12,10 @@ class CFGKafka:
     BOOTSTRAP_SERVERS: List[str] = None
     INPUT_TOPIC: str = None
     GROUP_ID: str = None  # KAFKA_CONSUMER_GROUP
+    SECURITY_PROTOCOL: Optional[str] = 'PLAINTEXT'
+    SASL_MECHANISM: Optional[str] = None
+    SASL_USERNAME: Optional[str] = None
+    SASL_PASSWORD: Optional[str] = None
     ENABLE_AUTO_COMMIT: bool = True
     HEARTBEAT_INTERVAL_MS: int = 10_000
     SESSION_TIMEOUT_MS: int = 60_000
@@ -43,10 +47,22 @@ class CFGKafka:
     def __post_init__(self):
         if 'KAFKA_BOOTSTRAP_SERVERS' in os.environ:
             self.BOOTSTRAP_SERVERS = os.environ['KAFKA_BOOTSTRAP_SERVERS'].split(',')
+        if 'KAFKA_URL' in os.environ and not self.BOOTSTRAP_SERVERS:
+            self.BOOTSTRAP_SERVERS = os.environ['KAFKA_URL'].split(',')
+        if 'KAFKA_INTERNAL_URL' in os.environ and not self.BOOTSTRAP_SERVERS:
+            self.BOOTSTRAP_SERVERS = os.environ['KAFKA_INTERNAL_URL'].split(',')
         if 'KAFKA_INPUT_TOPIC' in os.environ:
             self.INPUT_TOPIC = os.environ['KAFKA_INPUT_TOPIC']
         if 'KAFKA_OUTPUT_TOPIC' in os.environ:
             self.OUTPUT_TOPIC = os.environ['KAFKA_OUTPUT_TOPIC']
+        if 'KAFKA_SECURITY_PROTOCOL' in os.environ:
+            self.SECURITY_PROTOCOL = os.environ['KAFKA_SECURITY_PROTOCOL']
+        if 'KAFKA_SASL_MECHANISM' in os.environ:
+            self.SASL_MECHANISM = os.environ['KAFKA_SASL_MECHANISM']
+        if 'KAFKA_SASL_USERNAME' in os.environ:
+            self.SASL_USERNAME = os.environ['KAFKA_SASL_USERNAME']
+        if 'KAFKA_SASL_PASSWORD' in os.environ:
+            self.SASL_PASSWORD = os.environ['KAFKA_SASL_PASSWORD']
         if 'ENABLE_AUTO_COMMIT' in os.environ:
             self.ENABLE_AUTO_COMMIT = bool(int(os.environ['ENABLE_AUTO_COMMIT']))
         if 'KAFKA_CONSUMER_GROUP' in os.environ:
@@ -74,6 +90,19 @@ class CFGKafka:
         if 'IMAGE_DOWNLOAD_VERIFY' in os.environ:
             self.IMAGE_DOWNLOAD_VERIFY = bool(int(os.environ['IMAGE_DOWNLOAD_VERIFY']))
         return None
+
+    def auth_kwargs(self) -> dict:
+        """Kafka auth configuration that can be passed into Kafka clients."""
+        kwargs = {}
+        if self.SECURITY_PROTOCOL:
+            kwargs['security_protocol'] = self.SECURITY_PROTOCOL
+        if self.SASL_MECHANISM:
+            kwargs['sasl_mechanism'] = self.SASL_MECHANISM
+        if self.SASL_USERNAME is not None:
+            kwargs['sasl_plain_username'] = self.SASL_USERNAME
+        if self.SASL_PASSWORD is not None:
+            kwargs['sasl_plain_password'] = self.SASL_PASSWORD
+        return kwargs
     
     def log_summary(self):
         separator = '═' * 80

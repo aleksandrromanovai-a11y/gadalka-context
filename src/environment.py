@@ -15,15 +15,33 @@ logger = get_logger(__name__)
 
 @dataclass
 class RedisConfig:
+    url: str | None = None
     host: str = 'redis'
     port: int = 6379
     db: int = 0
+    username: str | None = None
+    password: str | None = None
     window_size: int = 10
 
     def __post_init__(self) -> None:
-        self.host = os.environ.get('REDIS_HOST', self.host)
-        self.port = int(os.environ.get('REDIS_PORT', self.port))
+        self.url = (
+            os.environ.get('REDIS_URL')
+            or os.environ.get('REDIS_PUBLIC_URL')
+            or self.url
+        )
+        self.host = os.environ.get('REDIS_HOST') or os.environ.get('REDISHOST') or self.host
+        self.port = int(os.environ.get('REDIS_PORT') or os.environ.get('REDISPORT') or self.port)
         self.db = int(os.environ.get('REDIS_DB', self.db))
+        self.username = (
+            os.environ.get('REDIS_USERNAME')
+            or os.environ.get('REDISUSER')
+            or self.username
+        )
+        self.password = (
+            os.environ.get('REDIS_PASSWORD')
+            or os.environ.get('REDISPASSWORD')
+            or self.password
+        )
         self.window_size = int(os.environ.get('CHAT_HISTORY_WINDOW_SIZE', self.window_size))
 
 

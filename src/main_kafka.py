@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import Optional
 
 from environment import Config
@@ -35,15 +36,22 @@ def _process_message(responser: Responser, orchestrator: Orchestrator) -> None:
 
 
 def main() -> None:
-    cfg = Config()
-    kafka_cfg = CFGKafka()
+    try:
+        cfg = Config()
+        kafka_cfg = CFGKafka()
 
-    responser = Responser(cfg)
-    orchestrator = Orchestrator(cfg=kafka_cfg)
+        responser = Responser(cfg)
+        orchestrator = Orchestrator(cfg=kafka_cfg)
+    except Exception as exc:
+        logger.error('Failed to initialize: %s', exc, exc_info=True)
+        raise exc
 
     _process_message(responser, orchestrator)
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as exc:
+        sys.exit(1)
 

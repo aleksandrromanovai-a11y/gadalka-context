@@ -60,17 +60,21 @@ class KafkaMsgConsumer(multiprocessing.Process):
     def run(self) -> NoReturn:
         logger.info('Connecting to Kafka')
         try:
-            consumer = KafkaConsumer(
-                bootstrap_servers=self.cfg.BOOTSTRAP_SERVERS,
-                group_id=self.cfg.GROUP_ID,
-                auto_offset_reset='earliest',
-                enable_auto_commit=self.cfg.ENABLE_AUTO_COMMIT,
-                heartbeat_interval_ms=self.cfg.HEARTBEAT_INTERVAL_MS,
-                session_timeout_ms=self.cfg.SESSION_TIMEOUT_MS,
-                consumer_timeout_ms=self.cfg.CONSUMER_TIMEOUT_MS,
-                metadata_max_age_ms=20,
-                max_partition_fetch_bytes=self.cfg.MAX_PARTITION_FETCH_BYTES,
-                fetch_max_bytes=self.cfg.FETCH_MAX_BYTES)
+            consumer_kwargs = {
+                'bootstrap_servers': self.cfg.BOOTSTRAP_SERVERS,
+                'group_id': self.cfg.GROUP_ID,
+                'auto_offset_reset': 'earliest',
+                'enable_auto_commit': self.cfg.ENABLE_AUTO_COMMIT,
+                'heartbeat_interval_ms': self.cfg.HEARTBEAT_INTERVAL_MS,
+                'session_timeout_ms': self.cfg.SESSION_TIMEOUT_MS,
+                'consumer_timeout_ms': self.cfg.CONSUMER_TIMEOUT_MS,
+                'metadata_max_age_ms': 20,
+                'max_partition_fetch_bytes': self.cfg.MAX_PARTITION_FETCH_BYTES,
+                'fetch_max_bytes': self.cfg.FETCH_MAX_BYTES
+            }
+            consumer_kwargs.update(self.cfg.auth_kwargs())
+
+            consumer = KafkaConsumer(**consumer_kwargs)
             consumer.subscribe(pattern=self.cfg.INPUT_TOPIC)
 
             self.started.set()

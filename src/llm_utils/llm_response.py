@@ -41,9 +41,12 @@ class Responser:
         self.default_session_id = os.environ.get('MEMORY_DEFAULT_SESSION_ID', 'default_session')
         self.chat_client = self._define_chat_client()
         self.redis_memory = RedisMemory(
+            url=self.cfg.REDIS.url,
             host=self.cfg.REDIS.host,
             port=self.cfg.REDIS.port,
             db=self.cfg.REDIS.db,
+            username=self.cfg.REDIS.username,
+            password=self.cfg.REDIS.password,
             window_size=self.cfg.REDIS.window_size,
         )
         

@@ -12,25 +12,44 @@ logger = get_logger(__name__)
 class RedisMemory:
     def __init__(
         self,
+        url: str | None = None,
         host: str | None = None,
         port: int | None = None,
         db: int | None = None,
+        username: str | None = None,
+        password: str | None = None,
         window_size: int | None = None,
     ):
-        self.host = host or os.environ.get('REDIS_HOST', 'redis')
-        self.port = port or int(os.environ.get('REDIS_PORT', 6379))
-        self.db = db or int(os.environ.get('REDIS_DB', 0))
-        self.window_size = window_size or int(os.environ.get('CHAT_HISTORY_WINDOW_SIZE', 10))
+        self.url = url or os.environ.get('REDIS_URL') or os.environ.get('REDIS_PUBLIC_URL')
+        self.host = host or os.environ.get('REDIS_HOST') or os.environ.get('REDISHOST') or 'redis'
+        self.port = port if port is not None else int(
+            os.environ.get('REDIS_PORT') or os.environ.get('REDISPORT') or 6379
+        )
+        self.db = db if db is not None else int(os.environ.get('REDIS_DB') or 0)
+        self.username = username or os.environ.get('REDIS_USERNAME') or os.environ.get('REDISUSER')
+        self.password = password or os.environ.get('REDIS_PASSWORD') or os.environ.get('REDISPASSWORD')
+        self.window_size = (
+            window_size if window_size is not None else int(os.environ.get('CHAT_HISTORY_WINDOW_SIZE') or 10)
+        )
         self._client: redis.Redis | None = None
 
     def _get_client(self) -> redis.Redis:
         if self._client is None:
-            self._client = redis.Redis(
-                host=self.host,
-                port=self.port,
-                db=self.db,
-                decode_responses=True,
-            )
+            if self.url:
+                self._client = redis.from_url(
+                    self.url,
+                    db=self.db,
+                    decode_responses=True,
+                )
+            else:
+                self._client = redis.Redis(
+                    host=self.host,
+                    port=self.port,
+                    db=self.db,
+                    username=self.username,
+                    password=self.password,
+                    decode_responses=True,
+                )
         return self._client
 
     @staticmethod

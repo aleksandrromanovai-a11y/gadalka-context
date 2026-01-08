@@ -19,11 +19,14 @@ class KafkaProducerInput:
 class KafkaMsgProducer:
     def __init__(self, cfg: CFGKafka) -> None:
         self.cfg = cfg
-        self.producer = KafkaProducer(
-            bootstrap_servers=cfg.BOOTSTRAP_SERVERS,
-            batch_size=cfg.KAFKA_BATCH_SIZE,
-            linger_ms=cfg.LINGER_MS,
-        )
+        producer_kwargs = {
+            'bootstrap_servers': cfg.BOOTSTRAP_SERVERS,
+            'batch_size': cfg.KAFKA_BATCH_SIZE,
+            'linger_ms': cfg.LINGER_MS,
+        }
+        producer_kwargs.update(cfg.auth_kwargs())
+
+        self.producer = KafkaProducer(**producer_kwargs)
         return None
 
     def send(self, msg: KafkaProducerInput) -> None:
