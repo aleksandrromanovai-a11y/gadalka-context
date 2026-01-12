@@ -151,20 +151,19 @@ class Responser:
             {"role": "developer", "content": SYSTEM_PROMPT.strip()}
         ]
 
-        if recent_dialog:
-            messages.extend(recent_dialog)
-
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         blocks = [f"CURRENT_TIME:\n{current_time}"]
 
         if natal_chart:
+            chart_text = self._normalize_chart(natal_chart)
             blocks.append(
-                "NATAL_CHART (primary source of facts):\n"
-                "----\n"
-                f"{natal_chart}\n"
-                "----"
+                "NATAL_CHART (primary source of facts):\n----\n"
+                f"{chart_text}\n----"
             )
+        
+        if recent_dialog:
+            messages.extend(recent_dialog)
 
         if memory_context:
             blocks.append(
@@ -204,6 +203,18 @@ class Responser:
         except Exception as err:
             logger.error("Responses API failed: %s", err, exc_info=True)
             return None
+    
+    def _normalize_chart(self, natal_chart) -> str:
+        if natal_chart is None:
+            return ""
+        if isinstance(natal_chart, str):
+            # если это уже JSON-строка — оставляем
+            s = natal_chart.strip()
+            if s.startswith("{") or s.startswith("["):
+                return s
+            return natal_chart
+        # если это dict/list — сериализуем в JSON
+        return json.dumps(natal_chart, ensure_ascii=False, separators=(",", ":"))
 
 
     def _persist_memory(
