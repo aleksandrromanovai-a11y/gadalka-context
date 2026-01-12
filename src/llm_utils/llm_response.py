@@ -1,6 +1,7 @@
 from typing import Dict, Any, List
 from time import perf_counter
 import os
+import json
 from datetime import datetime
 from mem0 import Memory  # type: ignore
 
@@ -146,42 +147,59 @@ class Responser:
         recent_dialog: List[Dict[str, str]],
         memory_context: str,
     ) -> List[Dict[str, str]]:
+        # ВАЖНО: делаем "чистый" последний user-message (только запрос пользователя),
+        # а контекст (время/наталка/память) — отдельными system-сообщениями.
+        # Так модели проще корректно реагировать на короткие "давай/ок/продолжай".
 
-        messages: List[Dict[str, str]] = [
-            {"role": "developer", "content": SYSTEM_PROMPT.strip()}
-        ]
+        messages: List[Dict[str, str]] = [{'role': 'system', 'content': SYSTEM_PROMPT.strip()}]
 
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        blocks = [f"CURRENT_TIME:\n{current_time}"]
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        messages.append({'role': 'system', 'content': f'CURRENT_TIME:\n{current_time}'})
 
         if natal_chart:
             chart_text = self._normalize_chart(natal_chart)
-            blocks.append(
-                "NATAL_CHART (primary source of facts):\n----\n"
-                f"{chart_text}\n----"
+            messages.append(
+                {
+                    'role': 'system',
+                    'content': (
+                        'NATAL_CHART (primary source of facts):\n'
+                        '----\n'
+                        f'{chart_text}\n'
+                        '----'
+                    ),
+                }
             )
-        
-        if recent_dialog:
-            messages.extend(recent_dialog)
 
         if memory_context:
-            blocks.append(
-                "MEMORY_CONTEXT (secondary, may be imperfect):\n"
-                "----\n"
-                f"{memory_context}\n"
-                "----"
+            messages.append(
+                {
+                    'role': 'system',
+                    'content': (
+                        'MEMORY_CONTEXT (secondary, may be imperfect):\n'
+                        '----\n'
+                        f'{memory_context}\n'
+                        '----'
+                    ),
+                }
             )
 
-        blocks.append(
-            "USER_REQUEST:\n"
-            "----\n"
-            f"{request_text}\n"
-            "----"
-        )
+        if recent_dialog:
+            cleaned_dialog: list[Dict[str, str]] = []
+            for m in recent_dialog:
+                if not isinstance(m, dict):
+                    continue
+                role = str(m.get('role') or '').strip()
+                content = m.get('content')
+                if role not in ('user', 'assistant'):
+                    continue
+                if not isinstance(content, str):
+                    continue
+                if not content.strip():
+                    continue
+                cleaned_dialog.append({'role': role, 'content': content})
+            messages.extend(cleaned_dialog)
 
-        messages.append({"role": "user", "content": "\n\n".join(blocks)})
-
+        messages.append({'role': 'user', 'content': (request_text or '').strip()})
         return messages
 
 
@@ -206,15 +224,15 @@ class Responser:
     
     def _normalize_chart(self, natal_chart) -> str:
         if natal_chart is None:
-            return ""
+            return ''
         if isinstance(natal_chart, str):
             # если это уже JSON-строка — оставляем
             s = natal_chart.strip()
-            if s.startswith("{") or s.startswith("["):
+            if s.startswith('{') or s.startswith('['):
                 return s
             return natal_chart
         # если это dict/list — сериализуем в JSON
-        return json.dumps(natal_chart, ensure_ascii=False, separators=(",", ":"))
+        return json.dumps(natal_chart, ensure_ascii=False, separators=(',', ':'))
 
 
     def _persist_memory(
