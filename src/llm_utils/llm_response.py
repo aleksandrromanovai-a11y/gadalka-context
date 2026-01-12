@@ -37,7 +37,7 @@ class Responser:
         
         self.memory = Memory.from_config(self.mem0_cfg)
         self.search_top_k = int(os.environ.get('MEMORY_SEARCH_TOP_K', 5))
-        self.search_score_threshold = float(os.environ.get('MEMORY_SEARCH_SCORE_THRESHOLD', 0.2))
+        self.search_score_threshold = float(os.environ.get('MEMORY_SEARCH_SCORE_THRESHOLD', 0.1))
         self.max_context_chars = int(os.environ.get('MEMORY_CONTEXT_MAX_CHARS', 2000))
         self.default_user_id = os.environ.get('MEMORY_DEFAULT_USER_ID', 'default')
         self.default_session_id = os.environ.get('MEMORY_DEFAULT_SESSION_ID', 'default_session')
@@ -302,7 +302,7 @@ class Responser:
         top_k_items = sorted_items[: self.search_top_k]
 
         for item in top_k_items:
-            score = item.get('score')
+            score = item.get('rerank_score')
             content = item.get('memory') or item.get('content') or ''
             if not content:
                 continue
